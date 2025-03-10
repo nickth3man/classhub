@@ -1,258 +1,109 @@
 """
-Database Manager for the Academic Organizer application.
-
-This module handles database operations, including schema creation,
-data access, and query optimization.
+Database Manager for Academic Organizer.
+Implements repository pattern and connection management.
 """
 
 import logging
-import sqlite3
 from pathlib import Path
+from contextlib import contextmanager
+from typing import Generator, Any, Optional
 
+from sqlalchemy import create_engine, MetaData
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.exc import SQLAlchemyError
+
+from academic_organizer.utils.exceptions import DatabaseError
+from academic_organizer.database.models import Base
+from academic_organizer.database.repositories import (
+    CourseRepository,
+    AssignmentRepository,
+    MaterialRepository,
+    NotesRepository,
+    InstructorRepository
+)
 
 class DatabaseManager:
-    """
-    Database Manager for the Academic Organizer application.
-    
-    This class is responsible for:
-    - Database connection management
-    - Schema creation and updates
-    - Providing data access methods for other components
-    - Query optimization
-    - Transaction management
-    """
-    
-    def __init__(self, db_path):
-        """
-        Initialize the database manager.
-        
-        Args:
-            db_path (str or Path): Path to the SQLite database file
-        """
+    """Manages database connections and provides access to repositories."""
+
+    def __init__(self, db_path: Path):
         self.logger = logging.getLogger(__name__)
-        self.db_path = Path(db_path)
-        self.connection = None
-        
-    def initialize_database(self):
-        """
-        Initialize the database, creating it if it doesn't exist.
-        
-        Returns:
-            bool: True if initialization was successful, False otherwise
-        """
+        self.db_path = db_path
+        self.engine = None
+        self.SessionFactory = None
+        self._setup_engine()
+        self._initialize_repositories()
+
+    def _setup_engine(self) -> None:
+        """Initialize database engine and session factory."""
         try:
-            # Ensure the parent directory exists
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Connect to the database
-            self.connection = sqlite3.connect(str(self.db_path))
-            self.connection.row_factory = sqlite3.Row
-            
-            # Enable foreign keys
-            self.connection.execute("PRAGMA foreign_keys = ON")
-            
-            # Create tables if they don't exist
-            self._create_tables()
-            
-            self.logger.info(f"Database initialized successfully at {self.db_path}")
+            db_url = f"sqlite:///{self.db_path}"
+            self.engine = create_engine(
+                db_url,
+                echo=False,  # Set to True for SQL debugging
+                pool_pre_ping=True,  # Enable connection health checks
+                connect_args={"check_same_thread": False}  # Required for SQLite
+            )
+            self.SessionFactory = sessionmaker(bind=self.engine)
+        except Exception as e:
+            raise DatabaseError(f"Failed to setup database engine: {e}")
+
+    def _initialize_repositories(self) -> None:
+        """Initialize repository instances."""
+        self.courses = CourseRepository(self)
+        self.assignments = AssignmentRepository(self)
+        self.materials = MaterialRepository(self)
+        self.notes = NotesRepository(self)
+        self.instructors = InstructorRepository(self)
+
+    def initialize_database(self) -> None:
+        """Create database schema if it doesn't exist."""
+        try:
+            Base.metadata.create_all(self.engine)
+            self.logger.info("Database schema created successfully")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to create database schema: {e}")
+
+    @contextmanager
+    def session(self) -> Generator[Session, None, None]:
+        """Provide a transactional scope around a series of operations."""
+        session = self.SessionFactory()
+        try:
+            yield session
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            raise DatabaseError(f"Database transaction failed: {e}")
+        finally:
+            session.close()
+
+    def verify_connection(self) -> bool:
+        """Verify database connection is working."""
+        try:
+            with self.session() as session:
+                session.execute("SELECT 1")
             return True
-            
         except Exception as e:
-            self.logger.error(f"Error initializing database: {e}", exc_info=True)
+            self.logger.error(f"Database connection verification failed: {e}")
             return False
-    
-    def _create_tables(self):
-        """
-        Create database tables if they don't exist.
-        """
-        cursor = self.connection.cursor()
+
+    def backup_database(self, backup_path: Optional[Path] = None) -> Path:
+        """Create a backup of the database."""
+        if backup_path is None:
+            backup_path = self.db_path.parent / f"{self.db_path.stem}_backup.db"
         
-        # Create Courses table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS courses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            code TEXT,
-            semester TEXT,
-            instructor_id INTEGER,
-            syllabus_path TEXT,
-            description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (instructor_id) REFERENCES instructors(id)
-        )
-        ''')
-        
-        # Create Instructors table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS instructors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT,
-            phone TEXT,
-            office_location TEXT,
-            office_hours TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        ''')
-        
-        # Create Assignments table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS assignments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            course_id INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT,
-            due_date TIMESTAMP,
-            status TEXT DEFAULT 'pending',
-            priority INTEGER DEFAULT 0,
-            estimated_time INTEGER,  -- in minutes
-            actual_time INTEGER,     -- in minutes
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (course_id) REFERENCES courses(id)
-        )
-        ''')
-        
-        # Create Materials table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS materials (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            course_id INTEGER,
-            title TEXT NOT NULL,
-            file_path TEXT NOT NULL,
-            file_type TEXT,
-            tags TEXT,
-            content_text TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (course_id) REFERENCES courses(id)
-        )
-        ''')
-        
-        # Create Notes table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            course_id INTEGER,
-            assignment_id INTEGER,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            tags TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (course_id) REFERENCES courses(id),
-            FOREIGN KEY (assignment_id) REFERENCES assignments(id)
-        )
-        ''')
-        
-        # Create virtual table for full-text search
-        cursor.execute('''
-        CREATE VIRTUAL TABLE IF NOT EXISTS fts_materials
-        USING fts5(
-            title, 
-            content_text,
-            tags,
-            content='materials',
-            content_rowid='id'
-        )
-        ''')
-        
-        # Create trigger to keep FTS index updated
-        cursor.execute('''
-        CREATE TRIGGER IF NOT EXISTS materials_ai AFTER INSERT ON materials BEGIN
-            INSERT INTO fts_materials(rowid, title, content_text, tags)
-            VALUES (new.id, new.title, new.content_text, new.tags);
-        END;
-        ''')
-        
-        cursor.execute('''
-        CREATE TRIGGER IF NOT EXISTS materials_ad AFTER DELETE ON materials BEGIN
-            INSERT INTO fts_materials(fts_materials, rowid, title, content_text, tags)
-            VALUES('delete', old.id, old.title, old.content_text, old.tags);
-        END;
-        ''')
-        
-        cursor.execute('''
-        CREATE TRIGGER IF NOT EXISTS materials_au AFTER UPDATE ON materials BEGIN
-            INSERT INTO fts_materials(fts_materials, rowid, title, content_text, tags)
-            VALUES('delete', old.id, old.title, old.content_text, old.tags);
-            INSERT INTO fts_materials(rowid, title, content_text, tags)
-            VALUES (new.id, new.title, new.content_text, new.tags);
-        END;
-        ''')
-        
-        self.connection.commit()
-        self.logger.info("Database tables created successfully")
-    
-    def close(self):
-        """
-        Close the database connection.
-        """
-        if self.connection:
-            self.connection.close()
-            self.connection = None
-            self.logger.info("Database connection closed")
-    
-    def get_connection(self):
-        """
-        Get the database connection.
-        
-        Returns:
-            sqlite3.Connection: The database connection
-        """
-        if not self.connection:
-            self.initialize_database()
-        return self.connection
-    
-    def execute_query(self, query, params=None):
-        """
-        Execute a query and return the results.
-        
-        Args:
-            query (str): SQL query to execute
-            params (tuple, optional): Parameters for the query
-            
-        Returns:
-            list: List of rows as dictionaries
-        """
         try:
-            cursor = self.get_connection().cursor()
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-                
-            results = [dict(row) for row in cursor.fetchall()]
-            return results
-            
+            import shutil
+            shutil.copy2(self.db_path, backup_path)
+            self.logger.info(f"Database backed up to: {backup_path}")
+            return backup_path
         except Exception as e:
-            self.logger.error(f"Error executing query: {e}", exc_info=True)
-            raise
-    
-    def execute_update(self, query, params=None):
-        """
-        Execute an update query (INSERT, UPDATE, DELETE).
-        
-        Args:
-            query (str): SQL query to execute
-            params (tuple, optional): Parameters for the query
-            
-        Returns:
-            int: Number of rows affected
-        """
+            raise DatabaseError(f"Failed to backup database: {e}")
+
+    def close(self) -> None:
+        """Close database connections."""
         try:
-            cursor = self.get_connection().cursor()
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-                
-            self.connection.commit()
-            return cursor.rowcount
-            
+            if self.engine:
+                self.engine.dispose()
+            self.logger.info("Database connections closed")
         except Exception as e:
-            self.logger.error(f"Error executing update: {e}", exc_info=True)
-            self.connection.rollback()
-            raise
+            raise DatabaseError(f"Failed to close database connections: {e}")
