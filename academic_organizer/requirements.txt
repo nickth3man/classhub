@@ -1,0 +1,25 @@
+# Academic Organizer Dependencies
+
+# Core Dependencies
+python>=3.8,<3.11  # Python 3.8 or higher, but less than 3.11 for compatibility
+pyqt6>=6.0.0       # GUI Framework
+pillow>=9.0.0      # Image processing
+pytesseract>=0.3.9 # OCR capabilities
+python-dateutil>=2.8.2  # Date handling utilities
+requests>=2.27.1   # HTTP requests for API integration
+sqlalchemy>=1.4.0  # SQL ORM for database operations
+pyyaml>=6.0        # Configuration file handling
+
+# AI Integration
+openai>=0.27.0     # For OpenRouter API integration
+
+# Text Processing
+nltk>=3.7          # Natural language processing
+spacy>=3.2.0       # Advanced NLP capabilities
+regex>=2022.1.18   # Enhanced regular expressions
+
+# Development Dependencies
+pytest>=7.0.0      # Testing framework
+black>=22.1.0      # Code formatting
+flake8>=4.0.1      # Linting
+mypy>=0.931        # Type checking
