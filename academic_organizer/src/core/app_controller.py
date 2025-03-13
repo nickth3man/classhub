@@ -49,11 +49,23 @@ class ApplicationController:
             raise InitializationError(f"Failed to create app data directory: {e}")
 
     def _initialize_database(self) -> None:
-        """Initialize database component."""
+        """Initialize database component based on config."""
         try:
-            db_path = self.app_data_dir / "academic_organizer.db"
-            self.components.db_manager = DatabaseManager(db_path)
+            db_engine = self.config.get("database.engine", "sqlite")
+            if db_engine == "sqlite":
+                db_path = self.app_data_dir / "academic_organizer.db"
+                self.components.db_manager = DatabaseManager(db_path)
+            elif db_engine == "postgresql":
+                db_url = self.config.get("database.postgres_url")
+                if not db_url:
+                    raise ConfigurationError("PostgreSQL URL not configured.")
+                self.components.db_manager = PostgresDatabaseManager(db_url)
+            else:
+                raise ConfigurationError(f"Unsupported database engine: {db_engine}")
+
             self.components.db_manager.initialize_database()
+        except ConfigurationError as e:
+            raise e # Re-raise ConfigurationError
         except Exception as e:
             raise InitializationError(f"Database initialization failed: {e}")
 
@@ -109,4 +121,4 @@ class ApplicationController:
                 self.components.db_manager.close()
             self.logger.info("Application shutdown complete")
         except Exception as e:
-        self.logger.info("Application shutdown complete")
+            self.logger.info("Application shutdown complete")

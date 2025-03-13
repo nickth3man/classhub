@@ -1,140 +1,48 @@
-"""
-Pytest configuration and fixtures for the Academic Organizer application.
-"""
-
-import os
-import tempfile
+"""Test configuration and fixtures."""
 import pytest
 from pathlib import Path
+import tempfile
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from ..src.database.models.base import Base
+from ..src.database.db_manager import DatabaseManager
+from ..src.config.config_manager import ConfigManager
 
-from academic_organizer.src.database.db_manager import DatabaseManager
-from academic_organizer.src.utils.config import load_config
+@pytest.fixture(scope="session")
+def test_db_path():
+    """Create temporary database file."""
+    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+        temp_db_path = Path(f.name)
+    print(f"Temporary database path: {temp_db_path}")  # Added log
+    yield temp_db_path
+    temp_db_path.unlink()
 
-
-@pytest.fixture
-def temp_dir():
-    """Create a temporary directory for test files."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        yield Path(temp_dir)
-
-
-@pytest.fixture
-def test_config():
-    """Create a test configuration."""
+@pytest.fixture(scope="session")
+def test_config(test_db_path):
+    """Create test configuration."""
     return {
-        "application": {
-            "name": "Academic Organizer Test",
-            "version": "0.1.0",
-            "data_dir": "~/.academic_organizer_test",
+        'database': {
+            'path': str(test_db_path),
+            'pool_size': 3,
+            'max_overflow': 5,
+            'pool_timeout': 10
         },
-        "database": {
-            "type": "sqlite",
-            "name": "academic_organizer_test.db",
-        },
-        "gui": {
-            "theme": "system",
-            "font_size": 10,
-            "window_size": {
-                "width": 1200,
-                "height": 800,
-            },
-        },
-        "modules": {
-            "course_manager": {
-                "enabled": True,
-            },
-            "file_organizer": {
-                "enabled": True,
-                "default_storage_path": "~/Documents/Academic_Organizer_Test",
-            },
-            "assignment_tracker": {
-                "enabled": True,
-                "reminder_days_before": 3,
-            },
-            "study_enhancement": {
-                "enabled": True,
-            },
-            "lms_bridge": {
-                "enabled": False,
-            },
-        },
-        "ai": {
-            "enabled": False,  # Disable AI in tests
-            "api_type": "openrouter",
-            "api_key_env_var": "OPENROUTER_API_KEY",
-        },
+        'testing': {
+            'enabled': True,
+            'log_level': 'DEBUG'
+        }
     }
 
+@pytest.fixture(scope="session")
+def db_manager(test_config):
+    """Create database manager instance."""
+    manager = DatabaseManager(ConfigManager(test_config))
+    manager.initialize_database()
+    yield manager
+    manager.cleanup()
 
 @pytest.fixture
-def in_memory_db():
-    """Create an in-memory database for testing."""
-    db_manager = DatabaseManager(":memory:")
-    db_manager.initialize_database()
-    yield db_manager
-    db_manager.close()
-
-
-@pytest.fixture
-def sample_courses(in_memory_db):
-    """Create sample courses in the database."""
-    courses = [
-        {"name": "Calculus II", "code": "MATH 201", "semester": "Spring 2025"},
-        {"name": "Physics 101", "code": "PHYS 101", "semester": "Spring 2025"},
-        {"name": "Data Structures", "code": "CS 201", "semester": "Spring 2025"},
-    ]
-    
-    for course in courses:
-        in_memory_db.execute_update(
-            "INSERT INTO courses (name, code, semester) VALUES (?, ?, ?)",
-            (course["name"], course["code"], course["semester"])
-        )
-    
-    return courses
-
-
-@pytest.fixture
-def sample_assignments(in_memory_db, sample_courses):
-    """Create sample assignments in the database."""
-    # Get course IDs
-    courses = in_memory_db.execute_query("SELECT id, code FROM courses")
-    course_ids = {course["code"]: course["id"] for course in courses}
-    
-    assignments = [
-        {
-            "title": "Calculus Homework 5",
-            "course_code": "MATH 201",
-            "due_date": "2025-04-15",
-            "status": "Not Started",
-            "priority": 2,
-        },
-        {
-            "title": "Physics Lab Report",
-            "course_code": "PHYS 101",
-            "due_date": "2025-04-20",
-            "status": "Not Started",
-            "priority": 1,
-        },
-        {
-            "title": "Programming Project",
-            "course_code": "CS 201",
-            "due_date": "2025-05-01",
-            "status": "Not Started",
-            "priority": 2,
-        },
-    ]
-    
-    for assignment in assignments:
-        course_id = course_ids[assignment["course_code"]]
-        in_memory_db.execute_update(
-            "INSERT INTO assignments (course_id, title, due_date, status, priority) VALUES (?, ?, ?, ?, ?)",
-            (
-                course_id,
-                assignment["title"],
-                assignment["due_date"],
-                assignment["status"],
-                assignment["priority"],
-            )
-        )
-    
-    return assignments
+def db_session(db_manager):
+    """Create database session."""
+    with db_manager.session_scope() as session:
+        yield session

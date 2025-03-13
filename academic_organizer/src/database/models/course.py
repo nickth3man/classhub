@@ -1,10 +1,11 @@
-"""Course-related database models."""
-
+"""Course-related database models with validation."""
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Table
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 from sqlalchemy.ext.hybrid import hybrid_property
+from ...utils.error_handler import ValidationError, handle_errors
+from ...utils.validators import validate_email, validate_phone, sanitize_input
 
 from academic_organizer.database.models.base import Base
 
@@ -46,6 +47,39 @@ class Course(Base):
     def term(self) -> str:
         """Return the full term (semester and year)."""
         return f"{self.semester} {self.year}"
+
+    @validates('code')
+    def validate_code(self, key: str, code: str) -> str:
+        """Validate course code format."""
+        code = sanitize_input(code)
+        if not code or len(code) > 20:
+            raise ValidationError("Invalid course code")
+        return code
+    
+    @validates('name')
+    def validate_name(self, key: str, name: str) -> str:
+        """Validate course name."""
+        name = sanitize_input(name)
+        if not name or len(name) > 100:
+            raise ValidationError("Invalid course name")
+        return name
+    
+    @validates('year')
+    def validate_year(self, key: str, year: int) -> int:
+        """Validate course year."""
+        current_year = datetime.now().year
+        if not (current_year - 1 <= year <= current_year + 1):
+            raise ValidationError("Invalid course year")
+        return year
+    
+    @validates('semester')
+    def validate_semester(self, key: str, semester: str) -> str:
+        """Validate semester value."""
+        valid_semesters = {'Fall', 'Spring', 'Summer', 'Winter'}
+        semester = sanitize_input(semester)
+        if semester not in valid_semesters:
+            raise ValidationError("Invalid semester")
+        return semester
 
     def __repr__(self) -> str:
         return f"<Course {self.code} {self.name} ({self.term})>"

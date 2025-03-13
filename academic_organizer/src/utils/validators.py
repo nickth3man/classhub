@@ -1,57 +1,56 @@
-"""Data validation utilities."""
+"""Input validation and sanitization utilities."""
+import re
+from typing import Any, Optional
+import html
+from .error_handler import ValidationError
 
-from typing import Dict, Any
-from academic_organizer.utils.exceptions import ValidationError
+def sanitize_input(value: Any) -> str:
+    """Sanitize input string to prevent XSS and injection attacks."""
+    if value is None:
+        return ""
+    
+    # Convert to string and trim
+    value = str(value).strip()
+    
+    # HTML escape
+    value = html.escape(value)
+    
+    # Remove potentially dangerous characters
+    value = re.sub(r'[<>\'";`]', '', value)
+    
+    return value
 
-def validate_course_data(data: Dict[str, Any]) -> None:
-    """
-    Validate course data.
-    
-    Args:
-        data: Dictionary containing course information
-        
-    Raises:
-        ValidationError: If validation fails
-    """
-    required_fields = ['code', 'name', 'semester', 'year']
-    
-    for field in required_fields:
-        if field not in data:
-            raise ValidationError(f"Missing required field: {field}")
-        
-    if not isinstance(data['code'], str) or len(data['code']) > 20:
-        raise ValidationError("Invalid course code")
-        
-    if not isinstance(data['name'], str) or len(data['name']) > 100:
-        raise ValidationError("Invalid course name")
-        
-    if not isinstance(data['semester'], str) or len(data['semester']) > 20:
-        raise ValidationError("Invalid semester")
-        
-    if not isinstance(data['year'], int) or data['year'] < 1900:
-        raise ValidationError("Invalid year")
+def validate_email(email: str) -> str:
+    """Validate email format."""
+    email = sanitize_input(email)
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(pattern, email):
+        raise ValidationError("Invalid email format")
+    return email
 
-def validate_instructor_data(data: Dict[str, Any]) -> None:
-    """
-    Validate instructor data.
-    
-    Args:
-        data: Dictionary containing instructor information
-        
-    Raises:
-        ValidationError: If validation fails
-    """
-    required_fields = ['first_name', 'last_name', 'email']
-    
-    for field in required_fields:
-        if field not in data:
-            raise ValidationError(f"Missing required field: {field}")
-            
-    if not isinstance(data['first_name'], str) or len(data['first_name']) > 50:
-        raise ValidationError("Invalid first name")
-        
-    if not isinstance(data['last_name'], str) or len(data['last_name']) > 50:
-        raise ValidationError("Invalid last name")
-        
-    if not isinstance(data['email'], str) or len(data['email']) > 100:
-        raise ValidationError("Invalid email")
+def validate_phone(phone: str) -> str:
+    """Validate phone number format."""
+    phone = sanitize_input(phone)
+    # Remove all non-numeric characters
+    phone = re.sub(r'\D', '', phone)
+    if not (7 <= len(phone) <= 15):
+        raise ValidationError("Invalid phone number length")
+    return phone
+
+def validate_file_path(path: str) -> str:
+    """Validate and sanitize file path."""
+    path = sanitize_input(path)
+    # Remove potentially dangerous path traversal attempts
+    path = re.sub(r'\.\./', '', path)
+    path = re.sub(r'\.\.\\', '', path)
+    return path
+
+def validate_date_format(date_str: str) -> bool:
+    """Validate date string format (YYYY-MM-DD)."""
+    pattern = r'^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$'
+    return bool(re.match(pattern, date_str))
+
+def validate_time_format(time_str: str) -> bool:
+    """Validate time string format (HH:MM or HH:MM:SS)."""
+    pattern = r'^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$'
+    return bool(re.match(pattern, time_str))

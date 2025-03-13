@@ -22,31 +22,31 @@ from academic_organizer.database.repositories import (
     InstructorRepository
 )
 
-class DatabaseManager:
-    """Manages database connections and provides access to repositories."""
+class DatabaseManager(BaseDatabaseManager):
+    """Manages SQLite database connections and provides access to repositories."""
 
     def __init__(self, db_path: Path):
+        super().__init__(f"sqlite:///{db_path}") # Initialize with db_url
         self.logger = logging.getLogger(__name__)
-        self.db_path = db_path
+        self.db_path = db_path # Keep db_path for sqlite specific operations
         self.engine = None
         self.SessionFactory = None
         self._setup_engine()
         self._initialize_repositories()
 
-    def _setup_engine(self) -> None:
-        """Initialize database engine and session factory."""
-        try:
-            db_url = f"sqlite:///{self.db_path}"
-            self.engine = create_engine(
-                db_url,
-                echo=False,  # Set to True for SQL debugging
-                pool_pre_ping=True,  # Enable connection health checks
-                connect_args={"check_same_thread": False}  # Required for SQLite
-            )
-            self.SessionFactory = sessionmaker(bind=self.engine)
-        except Exception as e:
-            raise DatabaseError(f"Failed to setup database engine: {e}")
-
+    
+        def _setup_engine(self) -> None:
+            """Initialize SQLite engine and session factory."""
+            try:
+                self.engine = create_engine(
+                    self.db_url, # Use db_url from base class
+                    echo=False,  # Set to True for SQL debugging
+                    pool_pre_ping=True,  # Enable connection health checks
+                    connect_args={"check_same_thread": False}  # Required for SQLite
+                )
+                self.SessionFactory = sessionmaker(bind=self.engine)
+            except Exception as e:
+                raise DatabaseError(f"Failed to setup SQLite engine: {e}")
     def _initialize_repositories(self) -> None:
         """Initialize repository instances."""
         self.courses = CourseRepository(self)
@@ -59,6 +59,7 @@ class DatabaseManager:
         """Create database schema if it doesn't exist."""
         try:
             Base.metadata.create_all(self.engine)
+            print("Database schema created.")  # Added log
             self.logger.info("Database schema created successfully")
         except SQLAlchemyError as e:
             raise DatabaseError(f"Failed to create database schema: {e}")
@@ -87,17 +88,17 @@ class DatabaseManager:
             return False
 
     def backup_database(self, backup_path: Optional[Path] = None) -> Path:
-        """Create a backup of the database."""
+        """Create a backup of the SQLite database."""
         if backup_path is None:
             backup_path = self.db_path.parent / f"{self.db_path.stem}_backup.db"
-        
+
         try:
             import shutil
             shutil.copy2(self.db_path, backup_path)
-            self.logger.info(f"Database backed up to: {backup_path}")
+            self.logger.info(f"SQLite database backed up to: {backup_path}")
             return backup_path
         except Exception as e:
-            raise DatabaseError(f"Failed to backup database: {e}")
+            raise DatabaseError(f"Failed to backup SQLite database: {e}")
 
     def close(self) -> None:
         """Close database connections."""
